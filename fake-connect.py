@@ -26,8 +26,9 @@ RAKNET_PROTOCOL_VERSION = 6
 
 # Stationeers message constants (from decompiled MessageFactory)
 CHANNEL_GENERAL_TRAFFIC = 0x86  # 134
-MSG_VERIFY_PLAYER = 0x70        # 112 - client sends auth
-MSG_VERIFY_PLAYER_REQUEST = 0x71 # 113 - server sends challenge
+MSG_VERIFY_PLAYER = 0x73         # 112 - client sends auth
+MSG_VERIFY_PLAYER_REQUEST = 0x74 # 113 - server sends challenge
+MSG_LIBCONSTRUCT_ID = 0xA9
 
 # ConnectionMethod enum (from decompiled ConnectionMethod.cs)
 CONNECTION_METHOD_ROCKETNET = 0
@@ -58,7 +59,6 @@ def send_ack(sock, seq_num):
     ack += struct.pack("B", 1)
     ack += struct.pack("<I", seq_num)[:3]
     sock.sendto(ack, (HOST, PORT))
-
 
 def extract_frame_data(frame):
     if not frame or frame[0] != 0x84:
@@ -155,6 +155,7 @@ def build_verify_player(owner_conn_id, client_id, name, password, version, conn_
     msg += write_string(password)
     msg += write_string(version)
     msg += struct.pack("B", conn_method)
+    msg += b'\x02\x00\x00\x00\x00'  # booster networking version field — required, matches server's own tail
     return msg
 
 
@@ -167,6 +168,11 @@ def stay_connected(sock, seq, duration):
             if resp[0] == 0x84:
                 s = struct.unpack("<I", resp[1:4] + b'\x00')[0]
                 send_ack(sock, s)
+                data = extract_frame_data(resp)
+                if data and data[0] == MSG_LIBCONSTRUCT_ID:
+                    # Echo the fingerprint verbatim — required to be treated as fully connected
+                    sock.sendto(make_frame(seq, data), (HOST, PORT))
+                    seq += 1
         except socket.timeout:
             ping = struct.pack("B", 0x00) + struct.pack(">Q", int(time.time() * 1000))
             sock.sendto(make_frame(seq, ping), (HOST, PORT))
